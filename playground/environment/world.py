@@ -20,7 +20,7 @@ class World:
 
         # Initialize Hilbert curve object for generating obstacle ids
         max_side = max(self.__width, self.__height)
-        side_len = math.ceil(math.log2(max_side * max_side)) // 2
+        side_len = math.ceil(math.log2(max_side))
         self.__hilbert_curve = HilbertCurve(p=side_len, n=2)
 
     def read_map(self):
