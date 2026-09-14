@@ -22,15 +22,26 @@ class FrontEnd:
         self.__frame_align_error = 10  # distance in pixels
         self.__icp = ICP()
         self.__frames = []
-        self.__knn = NearestNeighbors(n_neighbors=1)
+        self.__knn = NearestNeighbors(n_neighbors=1) # find only 1 neighbor
 
+    # Kept for reference; superseded by match_ids below.
+    # match_ids is more preformant and accurate.
+    # Time Complexity:
+    # - __find_frames_correspondences :  O((Na + Nb) log Nb) best case, possibly O(Na·Nb)
+    # - match_ids time: O(Na log Na + Nb log Nb)
     def __find_frames_correspondences(self, frame_a, frame_b, min_dist=5):
+        # Gets observed obstacles' id; and reshape it into 2D matrix
         ids_a = frame_a.observed_points[:, 2]
         ids_a = ids_a.reshape((-1, 1))
         ids_b = frame_b.observed_points[:, 2]
         ids_b = ids_b.reshape((-1, 1))
+
+        # find neighbors based on ID proximity.
+        # Since ids_b is in shape of (N, 1), KNN just find neighbor based on
+        # ID proximity as each ID is in 1D space.
         estimator = self.__knn.fit(ids_b)
         distances, indices = estimator.kneighbors(ids_a, return_distance=True)
+
         # remove outliers
         idx_a = []
         idx_b = []
@@ -41,6 +52,34 @@ class FrontEnd:
                     idx_a.append(i_a)
                     idx_b.append(i_b)
             used_ids.add(i_b)
+
+        return idx_a, idx_b
+
+    def match_ids(self, frame_a, frame_b, min_dist=5):
+        """Match frame points by obstacle id via an optimal 1D sweep:
+        sorted non-crossing two-pointer gives max matches within min_dist."""
+        ids_a = frame_a.observed_points[:, 2]
+        ids_b = frame_b.observed_points[:, 2]
+
+        order_a = np.argsort(ids_a)
+        order_b = np.argsort(ids_b)
+        sorted_a, sorted_b = ids_a[order_a], ids_b[order_b]
+
+        idx_a, idx_b = [], []
+        i = j = 0
+        while i < len(sorted_a) and j < len(sorted_b):
+            if abs(sorted_a[i] - sorted_b[j]) <= min_dist:
+                idx_a.append(int(order_a[i]))
+                idx_b.append(int(order_b[j]))
+                i += 1
+                j += 1
+            elif sorted_a[i] < sorted_b[j]:
+                # A too small to reach B[j] or any later B
+                i += 1
+            else:
+                # B too small for A[i] or any later A
+                j += 1
+
         return idx_a, idx_b
 
     def add_key_frame(self, sensor):
@@ -70,7 +109,7 @@ class FrontEnd:
         return None
 
     def align_new_frame(self, frame_candidate, key_frame):
-        idx_a, idx_b = self.__find_frames_correspondences(frame_candidate, key_frame)
+        idx_a, idx_b = self.match_ids(frame_candidate, key_frame)
         points_a = frame_candidate.observed_points[idx_a, :2]
         points_b = key_frame.observed_points[idx_b, :2]
         rot, pos, align_error = self.__icp.find_transform(points_a, points_b)
