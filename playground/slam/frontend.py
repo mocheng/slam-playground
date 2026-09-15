@@ -109,25 +109,48 @@ class FrontEnd:
         return None
 
     def align_new_frame(self, frame_candidate, key_frame):
+        """Aligns a candidate frame to a reference keyframe using shared obstacles and 2D ICP.
+
+    Args:
+        frame_candidate: The new frame object whose world pose needs to be updated.
+        key_frame: The reference keyframe object with known world coordinates.
+
+    Returns:
+        bool: True if alignment succeeds within the error threshold, False otherwise.
+        """
+        # Gets indices of same obstacles in two frames respectively
         idx_a, idx_b = self.match_ids(frame_candidate, key_frame)
+
+        # Gets coordinates of all obstacles
         points_a = frame_candidate.observed_points[idx_a, :2]
         points_b = key_frame.observed_points[idx_b, :2]
+
+        # points_b ≈ (rot @ points_a.T).T + pos
+        # points_b ≈ points_a @ rot.T + pos
         rot, pos, align_error = self.__icp.find_transform(points_a, points_b)
 
         if align_error <= self.__frame_align_error:
+            # Update candidate orientation relative to keyframe's world rotation
             frame_candidate.rotation = rot @ key_frame.rotation  # initial guess
 
+            # Set 2D local translation and rotate into world frame coordinates
             frame_candidate.position[:2] = pos
             frame_candidate.position = frame_candidate.rotation @ frame_candidate.position
+
+            # Add keyframe position to complete local-to-world transformation
             frame_candidate.position += key_frame.position  # initial guess
 
+            # Store relative ICP transformation metadata
             frame_candidate.relative_icp_position = pos
             frame_candidate.relative_icp_rotation = rot
+
             return True
         else:
             return False
 
     def create_new_frame(self, sensor):
+        # obstacles in shape: (M, 3) — one row per lidar hit in that scan; dtype is int64.
+        # Columns: [ vertical, horizontal, obstacle_id ], in the sensor/robot frame (not world coordinates).
         obstacles = sensor.get_obstacles()
         if obstacles is not None:
             return Frame(obstacles.copy())
